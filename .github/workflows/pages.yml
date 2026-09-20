@@ -1,4 +1,4 @@
-name: Deploy Elena Stroganova site
+name: Quality and Pages
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -17,177 +17,96 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    env:
+      NEXT_PUBLIC_BASE_PATH: /hair
     steps:
-      - name: Checkout client repository
-        uses: actions/checkout@v4
+      - name: Checkout client repository with history
+        uses: actions/checkout@v5
         with:
-          path: customer
+          fetch-depth: 0
 
-      - name: Checkout pinned TANEM visual base
-        uses: actions/checkout@v4
+      - name: Recover verified client data from source history
+        run: git show 3b28809bf0be505873a78dab8ba9eec29a74d961:site-data.mjs > legacy-site-data.mjs
+
+      - name: Checkout current TANEM master template
+        uses: actions/checkout@v5
         with:
-          repository: ichAEY/claytone-current
-          ref: ce1bd42b44e76e1851af9e069c4cbcf06fc8eac2
+          repository: ichAEY/Shablon-For-Only-Masters
+          ref: main
           path: template
 
-      - name: Checkout pinned TANEM factory layers
-        uses: actions/checkout@v4
-        with:
-          repository: ichAEY/tanem-master-template-v1
-          ref: 2c3590bdb8d4163532d126d67f27be1469a426c5
-          path: factory
-
-      - name: Apply client data and assets
-        shell: bash
+      - name: Preserve existing client photos
         run: |
-          set -e
-          cp customer/site-data.mjs template/site-data.mjs
-          cp customer/site-data.mjs factory/site-data.mjs
-          mkdir -p template/public/assets/client/portfolio
-          cp customer/assets/images/master.jpg template/public/assets/client/master.jpg
-          cp customer/assets/images/glavnayapk.PNG template/public/assets/client/glavnayapk.PNG
-          find customer/assets/images/portfolio -maxdepth 1 -type f -iname '*.png' -exec cp {} template/public/assets/client/portfolio/ \;
-          REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          echo "SITE_BASE_PATH=/$REPO_NAME" >> "$GITHUB_ENV"
-          printf '%s\n' '// Booking uses an external client booking URL.' > template/public/noop.js
+          mkdir -p template/public/assets/client
+          cp -a assets/. template/public/assets/client/
+
+      - name: Convert Elena data to current Hair preset
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { pathToFileURL } from 'node:url';
+          const old=(await import(pathToFileURL(process.cwd()+'/legacy-site-data.mjs'))).default;
+          const base=process.env.NEXT_PUBLIC_BASE_PATH||"";
+          const fix=(p)=>p ? `${base}/${p.replace(/^\//,'')}` : "";
+          const groups=(old.serviceCategories||[]).map(g=>({id:g.key,label:g.label,services:g.items}));
+          const data={
+            basePath:base,
+            template:{specialty:"hair",bookingProvider:"",reviewSource:"Яндекс Карты"},
+            brand:old.brand,
+            master:{
+              ...old.master,
+              name:"Елена",
+              instrumental:"Еленой",
+              heroTitle:"",
+              heroEmphasis:"эксперт по волосам",
+              heroCaption:"Парикмахер-колорист",
+              imageAlt:"Елена Строганова, парикмахер-колорист",
+              heroCopy:"Стрижки, окрашивание, блонд, уход и укладки с вниманием к состоянию волос, оттенку и вашему образу.",
+              visitMotto:"",
+              experienceYears:null,
+              aboutTitle:"Елена Строганова",
+              aboutLead:"",
+              aboutParagraphs:[],
+              skills:[]
+            },
+            location:{...old.location,country:"Россия",countryCode:"RU",timeZone:"Europe/Moscow",openTime:"10:00",closeTime:"21:00"},
+            contacts:{phoneDisplay:old.contacts.phoneDisplay,phoneHref:old.contacts.phoneHref,channels:[{type:"whatsapp",label:"WhatsApp",url:"https://wa.me/79687121165"}],messenger:null},
+            links:{bookingUrl:old.links.bookingUrl,reviewsUrl:old.links.reviewsUrl,mapUrl:old.links.mapUrl,routeUrl:old.links.routeUrl,mobileMapEmbedUrl:"about:blank",desktopMapEmbedUrl:"about:blank",yandexMapHrefMatch:"152363495769"},
+            reputation:old.reputation,
+            images:{
+              logo:"",portrait:fix(old.images.heroDesktop||old.images.portrait),portraitDesktop:fix(old.images.heroDesktop||old.images.portrait),
+              about:fix(old.images.about),favicon:`${base}/favicon-source.png`,heroDecoration:`${base}/assets/template/hair-tools.png`,
+              beforeAfter:[],gallery:(old.images.gallery||[]).map(x=>({...x,src:fix(x.src)}))
+            },
+            services:{groups},
+            i18n:{localLocale:"ru",locales:[{code:"ru",label:"RU"}],translations:{}},
+            reviews:(old.reviews||[]).map(r=>({...r,source:"Яндекс Карты"})),
+            promotions:[],amenities:[],
+            seo:{siteUrl:"https://ichaey.github.io/hair/",...old.seo},
+            analytics:old.analytics||{yandexMetrikaId:""}
+          };
+          fs.writeFileSync('template/site-data.mjs','export default '+JSON.stringify(data,null,2)+';\n');
+          NODE
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: template/package-lock.json
 
-      - name: Install dependencies
-        working-directory: template
-        run: npm ci
-
-      - name: Generate site from client data
-        working-directory: template
-        run: node scripts/generate-site.mjs
-
-      - name: Apply TANEM structure
-        working-directory: template
-        run: node ../factory/scripts/apply-tanem-template.mjs
-
-      - name: Apply TANEM final refinements
-        working-directory: template
-        run: node ../factory/scripts/apply-tanem-final.mjs
-
-      - name: Apply TANEM adaptive polish
-        working-directory: template
-        run: node ../factory/scripts/apply-tanem-polish.mjs
-
-      - name: Apply TANEM tuning
-        working-directory: template
-        run: node ../factory/scripts/apply-tanem-tuning.mjs
-
-      - name: Apply hair profile
-        working-directory: template
-        run: node ../customer/scripts/apply-hair-profile.mjs
-
-      - name: Configure static export
+      - name: Build current template
         working-directory: template
         run: |
-          cat > next.config.ts <<'EOF'
-          import type { NextConfig } from "next";
-          const basePath = process.env.SITE_BASE_PATH || "";
-          const nextConfig: NextConfig = {
-            output: "export",
-            trailingSlash: true,
-            images: { unoptimized: true },
-            basePath,
-          };
-          export default nextConfig;
-          EOF
+          npm ci
+          npm run lint
+          npm run build
 
-      - name: Prefix root asset URLs for project Pages
-        working-directory: template
-        shell: bash
-        run: |
-          node - <<'NODE'
-          const fs = require('fs');
-          const path = require('path');
-          const prefix = process.env.SITE_BASE_PATH || '';
-          const roots = ['app', 'public'];
-          const allowed = new Set(['.tsx', '.ts', '.js', '.mjs', '.css', '.html']);
-          const replacements = [
-            ['/assets/', `${prefix}/assets/`],
-            ['/claytone-enhancements.js', `${prefix}/claytone-enhancements.js`],
-            ['/android-scroll-fix.js', `${prefix}/android-scroll-fix.js`],
-            ['/favicon.svg', `${prefix}/favicon.svg`],
-            ['/noop.js', `${prefix}/noop.js`],
-          ];
-          function walk(dir) {
-            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-              const full = path.join(dir, entry.name);
-              if (entry.isDirectory()) walk(full);
-              else if (allowed.has(path.extname(entry.name))) {
-                let text = fs.readFileSync(full, 'utf8');
-                const before = text;
-                for (const [from, to] of replacements) text = text.split(from).join(to);
-                if (text !== before) fs.writeFileSync(full, text);
-              }
-            }
-          }
-          for (const root of roots) if (fs.existsSync(root)) walk(root);
-          NODE
-
-      - name: Prepare clean Pages build
-        working-directory: template
-        run: |
-          rm -rf public/_next
-          node - <<'NODE'
-          const fs = require('fs');
-          const config = JSON.parse(fs.readFileSync('tsconfig.json', 'utf8'));
-          config.exclude = [
-            ...(config.exclude || []),
-            'db/**', 'worker/**', 'examples/**', 'build/**', 'drizzle/**',
-            'drizzle.config.ts', 'vite.config.ts'
-          ];
-          fs.writeFileSync('tsconfig.json', JSON.stringify(config, null, 2) + '\n');
-          NODE
-
-      - name: Build client site
-        working-directory: template
-        run: npx next build
-
-      - name: Static export smoke test
-        shell: bash
-        run: |
-          set -e
-          test -f template/out/index.html
-          grep -RFqs 'Елена Строганова' template/out
-          grep -RFqs 'glavnayapk.PNG' template/out
-          grep -RFqs 'fail14.png' template/out
-
-      - name: Mirror verified build to branch Pages root
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd customer
-          rm -rf _next 404 _not-found
-          rm -f 404.html index.html index.txt __next.*.txt android-scroll-fix.js claytone-enhancements.js favicon.svg file.svg globe.svg noop.js window.svg
-          cp -a ../template/out/. .
-          touch .nojekyll
-          printf 'build_ok=%s\nqa_ok=true\nsource=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_SHA" > .tanem-build-ok
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Publish verified hair build to branch Pages [skip ci]"
-          for attempt in 1 2 3; do
-            git pull --rebase origin main && git push origin HEAD:main && exit 0
-            sleep 3
-          done
-          exit 1
-
-      - name: Setup Pages metadata
+      - name: Setup Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: template/out
 
