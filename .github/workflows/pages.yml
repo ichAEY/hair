@@ -79,7 +79,7 @@ jobs:
               beforeAfter:[],gallery:(old.images.gallery||[]).map(x=>({...x,src:fix(x.src)}))
             },
             services:{groups},
-            i18n:{localLocale:"ru",locales:[{code:"ru",label:"RU"}],translations:{}},
+            i18n:{localLocale:"ru",locales:[{code:"ru",label:"RU"},{code:"en",label:"EN"}],translations:{en:{}}},
             reviews:(old.reviews||[]).map(r=>({...r,source:"Яндекс Карты"})),
             promotions:[],amenities:[],
             seo:{siteUrl:"https://ichaey.github.io/hair/",...old.seo},
